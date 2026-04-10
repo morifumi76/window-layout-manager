@@ -11,6 +11,7 @@ struct SavePatternSheet: View {
     @State private var patternName = ""
     @State private var isSaving = false
     @State private var errorMessage: String? = nil
+    @FocusState private var isTextFieldFocused: Bool
 
     var body: some View {
         VStack(spacing: 16) {
@@ -26,9 +27,10 @@ struct SavePatternSheet: View {
                     .fontWeight(.medium)
             }
 
-            // パターン名の入力欄
+            // パターン名の入力欄（表示したら自動でフォーカスを当てる）
             TextField("パターン名（例：自宅・通常作業）", text: $patternName)
                 .textFieldStyle(.roundedBorder)
+                .focused($isTextFieldFocused)
 
             if let error = errorMessage {
                 Text(error)
@@ -55,6 +57,10 @@ struct SavePatternSheet: View {
         .onAppear {
             // 権限がなければ許可を求める
             AccessibilityPermission.requestIfNeeded()
+            // シート表示時にテキスト欄へ自動フォーカス
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                isTextFieldFocused = true
+            }
         }
     }
 
