@@ -1,0 +1,26 @@
+# Swift / Swift Package Manager
+.build/
+*.o
+*.d
+*.swp
+
+# Xcode（将来使う場合に備えて）
+*.xcodeproj/
+*.xcworkspace/
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# 環境変数
+.env
+.env.local
+
+# ビルド成果物
+dist/
+*.app/
