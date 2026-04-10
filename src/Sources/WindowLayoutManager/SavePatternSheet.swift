@@ -1,6 +1,5 @@
 // 配置保存シート
 // 「現在の配置を保存」ボタンを押したときに表示されるダイアログ
-// パターン名を入力して保存する
 
 import SwiftUI
 
@@ -18,16 +17,16 @@ struct SavePatternSheet: View {
             Text("現在の配置を保存")
                 .font(.headline)
 
-            // ディスプレイ数の表示（自動入力・変更不可）
+            // ディスプレイ数（自動取得・変更不可）
             HStack {
                 Text("ディスプレイ数")
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text("\(displayCount)画面")
+                Text("\(displayCount)画面パターンとして保存")
                     .fontWeight(.medium)
             }
 
-            // パターン名入力欄
+            // パターン名の入力欄
             TextField("パターン名（例：自宅・通常作業）", text: $patternName)
                 .textFieldStyle(.roundedBorder)
 
@@ -43,8 +42,8 @@ struct SavePatternSheet: View {
                 }
                 .keyboardShortcut(.escape)
 
-                Button("保存") {
-                    saveCurrentLayout()
+                Button(isSaving ? "取得中..." : "保存") {
+                    Task { await saveCurrentLayout() }
                 }
                 .keyboardShortcut(.return)
                 .disabled(patternName.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
@@ -52,19 +51,40 @@ struct SavePatternSheet: View {
             }
         }
         .padding(24)
-        .frame(width: 320)
+        .frame(width: 340)
+        .onAppear {
+            // 権限がなければ許可を求める
+            AccessibilityPermission.requestIfNeeded()
+        }
     }
 
-    private func saveCurrentLayout() {
+    // MARK: - 保存処理
+
+    @MainActor
+    private func saveCurrentLayout() async {
         let name = patternName.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return }
+
+        // 権限チェック
+        guard AccessibilityPermission.isGranted() else {
+            errorMessage = "アクセシビリティ権限が必要です。\nシステム設定 > プライバシーとセキュリティ > アクセシビリティ で許可してください。"
+            return
+        }
 
         isSaving = true
         errorMessage = nil
 
-        // 現在のウィンドウ配置を取得して保存
-        // TODO: F2実装時にWindowCaptureManager.captureAll()で実際の配置を取得する
-        let windows: [WindowInfo] = []
+        // バックグラウンドで現在のウィンドウ配置を取得する
+        let windows = await Task.detached(priority: .userInitiated) {
+            WindowCaptureManager.captureAll()
+        }.value
+
+        if windows.isEmpty {
+            errorMessage = "ウィンドウが取得できませんでした。\nアクセシビリティ権限を確認してください。"
+            isSaving = false
+            return
+        }
+
         let pattern = LayoutPattern(name: name, displayCount: displayCount, windows: windows)
         store.add(pattern)
         dismiss()

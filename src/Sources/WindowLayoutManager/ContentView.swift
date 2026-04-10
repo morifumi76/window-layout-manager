@@ -1,5 +1,5 @@
 // メイン画面
-// パターン一覧の表示・選択・削除・保存操作を行うUI
+// パターン一覧の表示・選択（復元）・削除・保存操作を行うUI
 
 import SwiftUI
 
@@ -9,16 +9,15 @@ struct ContentView: View {
     @State private var showSaveSheet = false
     @State private var deleteTarget: LayoutPattern? = nil
     @State private var showDeleteConfirm = false
+    @State private var isRestoring = false
+    @State private var restoringPatternID: UUID? = nil
+    @State private var permissionGranted = AccessibilityPermission.isGranted()
 
-    // ディスプレイ数ごとにグループ化したパターン（表示可能なものだけ）
-    private var filteredPatterns: [LayoutPattern] {
-        store.patterns(for: currentDisplayCount)
-    }
-
+    // ディスプレイ数でフィルタリング・グループ化したパターン
     private var groupedPatterns: [(Int, [LayoutPattern])] {
         let counts = [3, 2, 1]
         return counts.compactMap { count in
-            let group = filteredPatterns.filter { $0.displayCount == count }
+            let group = store.patterns(for: currentDisplayCount).filter { $0.displayCount == count }
             return group.isEmpty ? nil : (count, group)
         }
     }
@@ -27,6 +26,10 @@ struct ContentView: View {
         VStack(spacing: 0) {
             header
             Divider()
+            if !permissionGranted {
+                permissionWarning
+                Divider()
+            }
             patternList
             Divider()
             footer
@@ -43,6 +46,10 @@ struct ContentView: View {
         } message: { target in
             Text("「\(target.name)」を削除します。この操作は元に戻せません。")
         }
+        .onAppear {
+            // 権限状態を最新化
+            permissionGranted = AccessibilityPermission.isGranted()
+        }
     }
 
     // MARK: - ヘッダー
@@ -55,6 +62,7 @@ struct ContentView: View {
             // ディスプレイ数を再検知するボタン
             Button {
                 currentDisplayCount = DisplayManager.connectedDisplayCount()
+                permissionGranted = AccessibilityPermission.isGranted()
             } label: {
                 Image(systemName: "arrow.clockwise")
                     .foregroundStyle(.secondary)
@@ -64,6 +72,31 @@ struct ContentView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+    }
+
+    // MARK: - 権限警告バー
+
+    private var permissionWarning: some View {
+        Button {
+            AccessibilityPermission.requestIfNeeded()
+            // 少し待ってから権限状態を再確認する
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                permissionGranted = AccessibilityPermission.isGranted()
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text("アクセシビリティ権限が必要です。タップして許可")
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(.orange.opacity(0.1))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - ディスプレイ情報バー
@@ -118,7 +151,6 @@ struct ContentView: View {
     // ディスプレイ数ごとのグループ
     private func patternGroup(count: Int, patterns: [LayoutPattern]) -> some View {
         VStack(spacing: 0) {
-            // グループヘッダー
             HStack {
                 Text("\(count)画面パターン")
                     .font(.caption)
@@ -130,7 +162,6 @@ struct ContentView: View {
             .padding(.vertical, 6)
             .background(.quinary)
 
-            // パターン行
             ForEach(patterns) { pattern in
                 patternRow(pattern)
                 Divider()
@@ -139,12 +170,22 @@ struct ContentView: View {
         }
     }
 
-    // 個別パターン行
+    // 個別パターン行（クリックで復元）
     private func patternRow(_ pattern: LayoutPattern) -> some View {
         HStack {
+            // 復元中はスピナーを表示
+            if restoringPatternID == pattern.id {
+                ProgressView()
+                    .scaleEffect(0.7)
+                    .padding(.trailing, 4)
+            }
+
             Text(pattern.name)
                 .font(.body)
+                .opacity(restoringPatternID == pattern.id ? 0.5 : 1.0)
+
             Spacer()
+
             // 削除ボタン
             Button {
                 deleteTarget = pattern
@@ -159,7 +200,28 @@ struct ContentView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .contentShape(Rectangle())
-        // TODO: クリックでレイアウト復元（F3実装時に追加）
+        .onTapGesture {
+            guard !isRestoring else { return }
+            Task { await restorePattern(pattern) }
+        }
+    }
+
+    // MARK: - 復元処理
+
+    @MainActor
+    private func restorePattern(_ pattern: LayoutPattern) async {
+        guard AccessibilityPermission.isGranted() else {
+            AccessibilityPermission.requestIfNeeded()
+            return
+        }
+
+        isRestoring = true
+        restoringPatternID = pattern.id
+
+        await WindowRestoreManager.restore(pattern: pattern)
+
+        isRestoring = false
+        restoringPatternID = nil
     }
 
     // MARK: - フッター（保存ボタン）
